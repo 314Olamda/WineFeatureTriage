@@ -2,7 +2,17 @@
 
 > *Step 3c of the Wine Peptidome series — family triage (pesticides, lipids, polysaccharides, sugars, proteins, peptides) and a/b/y/immonium fragment-informed scoring of 2-10 AA peptide candidates, applied to full untargeted UHPLC-RP feature tables from wine lees.*
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Pyteomics](https://img.shields.io/badge/Pyteomics-mass%20engine-8B0000)](https://pyteomics.readthedocs.io/) [![ORCID](https://img.shields.io/badge/ORCID-0000--0002--7720--3733-a6ce39?logo=orcid)](https://orcid.org/0000-0002-7720-3733)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Pyteomics](https://img.shields.io/badge/Pyteomics-mass%20engine-8B0000)](https://pyteomics.readthedocs.io/) [![ORCID](https://img.shields.io/badge/ORCID-0000--0002--7720--3733-a6ce39?logo=orcid)](https://orcid.org/0000-0002-7720-3733) [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://314olamda-winefeaturetriage.streamlit.app)
+
+---
+
+## 🌐 Try it online — no Python required
+
+**[314olamda-winefeaturetriage.streamlit.app](https://314olamda-winefeaturetriage.streamlit.app)** *(update this link once deployed — see Deployment section below)*
+
+Upload a filled feature table, click Run, download the results workbook. No installation, no command line, no cloning this repo. This is the fastest way to use the tool if you're not planning to modify the code.
+
+The sections below cover running it locally instead (for development, customization, or if you want to raise the search-thoroughness parameters beyond what the web version exposes).
 
 ---
 
@@ -48,7 +58,9 @@ graph TD
 
 ---
 
-## ⚡ Quick start
+## ⚡ Quick start (local / command line)
+
+If you want to run this yourself rather than using the hosted web app:
 
 ```bash
 # 1. Clone
@@ -68,6 +80,31 @@ python wine_feature_classifier.py UHPLC_RP_Wine_Template.xlsx WineFeature_Result
 
 To run on your own uploaded feature table, it just needs to match the same column layout (see **Input format** below) — point the script at it instead of the generated template.
 
+Running locally lets you set `n_decoys`, `max_perms_per_composition`, and `max_compositions` higher than the web app's sliders allow, trading runtime for recall (see **Scaling for production**).
+
+---
+
+## 🖥️ Running the web app locally (optional)
+
+To test `streamlit_app.py` on your own machine before or instead of deploying:
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+Opens at `http://localhost:8501`.
+
+---
+
+## 🚀 Deploying your own instance
+
+1. Push `streamlit_app.py`, `requirements.txt`, `wine_feature_classifier.py`, `linear_denovo.py`, `mass_utils.py`, and `linear_peptide_scoring.py` to this repo
+2. Go to [share.streamlit.io](https://share.streamlit.io), sign in with GitHub, click **New app**
+3. Point it at this repo, branch `main`, file `streamlit_app.py`
+4. Deploy — you'll get a permanent URL (e.g. `314olamda-winefeaturetriage.streamlit.app`)
+5. Update the badge link and the **Try it online** link at the top of this README to match
+
 ---
 
 ## 📦 Repository structure
@@ -79,6 +116,8 @@ To run on your own uploaded feature table, it just needs to match the same colum
 | `linear_denovo.py` | Composition search + target-decoy FDR pipeline (shared with WineLinearPep, includes two performance fixes — see below) |
 | `wine_feature_classifier.py` | **This repo's core tool** — family triage + Sheet 1/2/3 workbook generation |
 | `generate_template.py` | Synthetic unannotated feature table generator, for testing without real data |
+| `streamlit_app.py` | Web UI — upload, run, download, no local Python needed (see **Try it online** above) |
+| `requirements.txt` | Dependencies for Streamlit Cloud deployment |
 | `example_data/UHPLC_RP_Wine_Template.xlsx` | Example input — 77 synthetic features across all families |
 
 ---
@@ -123,7 +162,7 @@ The 2-10 AA peptide tier is stricter: a feature is only called `Peptide_2-10AA` 
 
 ## 🚀 Scaling for production
 
-This tool is deliberately capped for fast, synchronous use. At masses where thousands of isobaric compositions exist, the capped search won't always surface the true composition. For production deployment (e.g. wired into a GitHub Actions workflow or an async job queue), raise:
+This tool is deliberately capped for fast, synchronous use. At masses where thousands of isobaric compositions exist, the capped search won't always surface the true composition. The **web app exposes `n_decoys`, `max_perms_per_composition`, and `max_compositions` as sliders** — raise them there for better recall on a real dataset, at the cost of a slower run. Running locally or via a background job (e.g. GitHub Actions) removes the practical ceiling on how high you can push them:
 
 ```python
 process_feature_table(
