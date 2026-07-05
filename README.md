@@ -191,26 +191,6 @@ Found and fixed while building this tool — both are real algorithmic issues, n
 
 ---
 
-## 🗄️ Debug archiving (optional)
-
-The web app can automatically archive every uploaded file, its results, and a run summary to a **private** GitHub repo, so you can review real uploads later for debugging or improving the classifier. This requires two Streamlit secrets:
-
-```toml
-GH_TOKEN       = "github_pat_..."   # fine-grained, Contents: Read+Write, scoped to ONE private repo
-GH_UPLOAD_REPO = "314Olamda/WineFeatureTriage-uploads"
-```
-
-Set these under your Streamlit Cloud app's **Settings → Secrets**. Without them, the app works normally and archiving silently no-ops — it never blocks or breaks the tool for whoever's using it. Archiving happens on both successful and failed runs, since failed runs are often the most useful ones to have a copy of.
-
-Setup steps:
-1. Create a **private** repo (e.g. `WineFeatureTriage-uploads`) — separate from this public code repo, since it will contain real uploaded data
-2. GitHub → Settings → Developer settings → Fine-grained tokens → generate one scoped to only that repo, Contents: Read+Write
-3. Add the two secrets above in Streamlit Cloud
-
-Uploads land under `uploads/<UTC timestamp>/` in the archive repo: the original file, `results.xlsx`, and a `run_info.txt` with the parameters used and success/failure status.
-
----
-
 ## ⚠️ Known limitations
 
 - **Recall vs. runtime tradeoff** (see Scaling for production above).
