@@ -194,6 +194,74 @@ def confidence_tier(score: float) -> str:
     return "VERY_LOW"
 
 
+def ion_evidence_table(
+    mz_obs: np.ndarray,
+    int_obs: np.ndarray,
+    sequence: str,
+    tol: float = 0.02,
+    charge: int = 1,
+) -> list[dict]:
+    """
+    Build a labeled, per-ion diagnostic table explaining WHY a sequence
+    scored the way it did -- the a1/a2/b1/b2/y1/y2/... breakdown with
+    theoretical m/z, the closest observed m/z (if matched), the mass
+    error (Delta Da and Delta ppm), and whether it counted as a match.
+
+    This is the audit trail behind score_spectrum_vs_linear's composite
+    score -- same ion series (b/a/y/immonium), same tolerance, but
+    reported per-ion instead of collapsed into coverage fractions, so a
+    researcher can see exactly which ions did (or didn't) support a call.
+    """
+    from mass_utils import immonium_ions
+
+    rows: list[dict] = []
+    n = len(sequence)
+
+    def _closest_match(theo_mz: float) -> tuple[float | None, float | None]:
+        """Return (observed_mz, observed_intensity) for the closest peak
+        within tol, or (None, None) if nothing matches."""
+        if len(mz_obs) == 0:
+            return None, None
+        diffs = np.abs(mz_obs - theo_mz)
+        idx = np.argmin(diffs)
+        if diffs[idx] <= tol:
+            return float(mz_obs[idx]), float(int_obs[idx])
+        return None, None
+
+    def _add_ion(label: str, ion_type: str, theo_mz: float) -> None:
+        obs_mz, obs_int = _closest_match(theo_mz)
+        matched = obs_mz is not None
+        delta_da = round(obs_mz - theo_mz, 5) if matched else None
+        delta_ppm = round(1e6 * (obs_mz - theo_mz) / theo_mz, 2) if matched else None
+        rows.append({
+            "ion_label": label,
+            "ion_type": ion_type,
+            "theoretical_mz": round(theo_mz, 5),
+            "observed_mz": round(obs_mz, 5) if matched else None,
+            "delta_Da": delta_da,
+            "delta_ppm": delta_ppm,
+            "observed_intensity": round(obs_int, 1) if matched else None,
+            "matched": matched,
+        })
+
+    # b/a ions: b1, b2, ... b(n-1) and a1, a2, ... a(n-1)
+    for i, mz in enumerate(b_ions(sequence, charge), start=1):
+        _add_ion(f"b{i}", "b", mz)
+    for i, mz in enumerate(a_ions(sequence, charge), start=1):
+        _add_ion(f"a{i}", "a", mz)
+
+    # y ions: y1 (C-terminal residue) ... y(n-1), matching the indexing
+    # convention used in y_ions() (i-th element = y_i, counted from C-term)
+    for i, mz in enumerate(y_ions(sequence, charge), start=1):
+        _add_ion(f"y{i}", "y", mz)
+
+    # Immonium ions, one per unique residue, labeled by residue letter
+    for aa, mz in immonium_ions(sequence).items():
+        _add_ion(f"imm_{aa}", "immonium", mz)
+
+    return rows
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # SELF-TEST
 # ══════════════════════════════════════════════════════════════════════════

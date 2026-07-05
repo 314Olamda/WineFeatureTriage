@@ -283,11 +283,35 @@ def process_feature_table(input_path: str, output_path: str,
 
     pep_results_df = pd.DataFrame(scored_rows)
 
+    # ── Sheet 4: ion-level evidence — the audit trail behind each score.
+    #    For every feature's top candidate, break down exactly which
+    #    a/b/y/immonium ions matched, with theoretical vs. observed m/z
+    #    and the mass error (Delta Da / Delta ppm) -- this is what lets
+    #    a researcher see WHY a sequence scored the way it did, not just
+    #    the collapsed composite number. ─────────────────────────────────
+    from linear_peptide_scoring import ion_evidence_table
+
+    evidence_rows = []
+    for _, row in pep_df.iterrows():
+        fid = row["Feature_ID"]
+        candidates = candidates_by_feature.get(fid, [])
+        if not candidates:
+            continue
+        top = candidates[0]
+        mz_obs, int_obs = parse_fragments(row.get("MS_Fragments (mz:intensity)", ""))
+        if len(mz_obs) == 0:
+            continue
+        for ion_row in ion_evidence_table(mz_obs, int_obs, top.sequence, tol=tol, charge=1):
+            evidence_rows.append({"Feature_ID": fid, "Sequence": top.sequence, **ion_row})
+
+    ion_evidence_df = pd.DataFrame(evidence_rows)
+
     # ── Write multi-sheet workbook ───────────────────────────────────────
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         summary.to_excel(writer, sheet_name="Summary_Families", index=False)
         oligo_df.to_excel(writer, sheet_name="Oligopeptides_gt50AA", index=False)
         pep_results_df.to_excel(writer, sheet_name="Peptides_2to10AA", index=False)
+        ion_evidence_df.to_excel(writer, sheet_name="Ion_Evidence", index=False)
 
     # ── Console report ───────────────────────────────────────────────────
     print(f"Processed {len(df)} features from {input_path}\n")

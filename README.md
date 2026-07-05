@@ -147,6 +147,9 @@ No `Compound_name`, `Sequence_peptide`, or annotation columns are expected or us
 | **Summary_Families** | Feature count and % of total per predicted family (Pesticide, Lipid, Polysaccharide, Sugar, Protein, Peptide_11-50AA, Oligopeptide_>50AA, Peptide_2-10AA) |
 | **Oligopeptides_gt50AA** | Features consistent with a linear peptide >50 AA — flagged, not scored (outside this tool's fragment-scoring scope) |
 | **Peptides_2to10AA** | Every feature confirmed as a 2-10 AA peptide by fragment evidence, with top candidate sequence, composite score, confidence tier, `q_storey`, and isobaric-tie flags |
+| **Ion_Evidence** | The audit trail behind each score: one row per a/b/y/immonium ion checked for every top candidate — theoretical m/z, observed m/z, Δ Da, Δ ppm, intensity, and matched/not |
+
+The web app also displays `Ion_Evidence` inline as an expandable table per feature, so you can see exactly why a sequence was called before downloading anything.
 
 ---
 
@@ -156,7 +159,7 @@ Family triage for pesticide/lipid/sugar/polysaccharide/protein uses **mass-windo
 
 The 2-10 AA peptide tier is stricter: a feature is only called `Peptide_2-10AA` if its **fragment ions actually support** a b/y/a/immonium composite score ≥ 0.40 — a matching precursor mass alone is not sufficient. This was a real bug caught during development: at masses in the 700-1500 Da range, hundreds to thousands of amino-acid compositions can match a given mass within 0.02 Da purely by coincidence, so mass-only classification mislabeled sugars and lipids as peptides. Requiring fragment-supported scoring above threshold fixed this.
 
-**Validated accuracy** (synthetic test set, 77 features): **100% precision**, **~12% recall** on 2-10 AA calls. The precision means every call the tool makes is trustworthy; the recall gap is a direct consequence of runtime caps (`max_compositions=15`, `max_perms_per_composition=15`) needed for interactive use — see **Scaling for production** below.
+**Validated accuracy** (synthetic test set, 77 features): **100% precision**, **~12% recall** on 2-10 AA calls. The precision means every call the tool makes is trustworthy; the recall gap is a direct consequence of runtime caps (`max_compositions=15`, `max_perms_per_composition=15`) needed for interactive use — see **Scaling for production** below. Every call's reasoning is auditable via the `Ion_Evidence` sheet / in-app expander (see Output section above) — nothing is a black-box score.
 
 ---
 
@@ -186,11 +189,34 @@ Found and fixed while building this tool — both are real algorithmic issues, n
 
 ---
 
+---
+
+## 🗄️ Debug archiving (optional)
+
+The web app can automatically archive every uploaded file, its results, and a run summary to a **private** GitHub repo, so you can review real uploads later for debugging or improving the classifier. This requires two Streamlit secrets:
+
+```toml
+GH_TOKEN       = "github_pat_..."   # fine-grained, Contents: Read+Write, scoped to ONE private repo
+GH_UPLOAD_REPO = "314Olamda/WineFeatureTriage-uploads"
+```
+
+Set these under your Streamlit Cloud app's **Settings → Secrets**. Without them, the app works normally and archiving silently no-ops — it never blocks or breaks the tool for whoever's using it. Archiving happens on both successful and failed runs, since failed runs are often the most useful ones to have a copy of.
+
+Setup steps:
+1. Create a **private** repo (e.g. `WineFeatureTriage-uploads`) — separate from this public code repo, since it will contain real uploaded data
+2. GitHub → Settings → Developer settings → Fine-grained tokens → generate one scoped to only that repo, Contents: Read+Write
+3. Add the two secrets above in Streamlit Cloud
+
+Uploads land under `uploads/<UTC timestamp>/` in the archive repo: the original file, `results.xlsx`, and a `run_info.txt` with the parameters used and success/failure status.
+
+---
+
 ## ⚠️ Known limitations
 
 - **Recall vs. runtime tradeoff** (see Scaling for production above).
 - **I/L isobaric ambiguity** is reported, not resolved — expect tied top candidates when a composition contains I or L. Disambiguation requires orthogonal evidence (retention time, ion mobility 1/K₀, chemical derivatization).
 - **Non-peptide family triage is heuristic**, not a confirmed identification — treat `Summary_Families` as a first-pass overview to prioritize what needs real spectral library confirmation, not a final annotation.
+- **Fixed Da tolerance, not ppm-scaled.** Ion matching uses a flat `tol` in Da (default 0.02) across the whole mass range. This was caught via the `Ion_Evidence` sheet: a MEDIUM-tier call showed several ions matching only at 21-27 ppm error while still passing the fixed tolerance — much looser than the sub-1 ppm seen on HIGH-tier calls. A ppm-scaled tolerance would flag this kind of borderline match more consistently across the mass range. Not yet fixed — check `delta_ppm` in `Ion_Evidence` manually for now when a call looks borderline.
 
 ---
 
