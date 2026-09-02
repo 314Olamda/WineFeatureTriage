@@ -3,36 +3,63 @@
 """
 linear_peptide_scoring.py — a/b/y + immonium scoring for linear peptides
 ══════════════════════════════════════════════════════════════════════════
-
 Sibling module to WineCycloPep's score_spectrum_vs_cyclic, adapted for
-LINEAR peptides (2–50 AA, optimized for the 2–10 AA range discussed
+LINEAR peptides (2-50 AA, optimized for the 2-10 AA range discussed
 earlier). Built on mass_utils.py (Pyteomics-backed) rather than a
 hand-rolled mass table, so it inherits the same fix already applied to
 the cyclic pipeline.
 
+PATCH NOTE (ppm-scaled tolerance)
+──────────────────────────────────
+The original version matched every ion (b/a/y/immonium, all masses from
+~70 Da immonium ions to >1000 Da precursor-range fragments) against a
+single flat `tol` in Da (default 0.02). Real instrument mass error scales
+with m/z, not as a constant Da offset -- this is exactly what the
+Ion_Evidence sheet caught in practice: a MEDIUM-tier call had several ions
+matching only at 21-27 ppm error while still passing the fixed 0.02 Da
+window, well outside the sub-1 ppm seen on HIGH-tier calls. A flat Da
+tolerance is simultaneously too loose at high mass (lets in spurious
+matches) and too tight at low mass (can reject real matches at the
+low-mass end, e.g. immonium ions).
+
+Fix: `tol_ppm` (default 15 ppm, typical for QTOF/Orbitrap-class
+instruments) is now the primary matching window, scaled per-ion as
+theo_mz * tol_ppm * 1e-6. An optional `tol_da_floor` sets a minimum
+absolute window so very low-mass ions aren't held to an unrealistically
+tiny window even in ppm terms (e.g. at 15 ppm, a 70 Da immonium ion gets
+only +-0.00105 Da -- probably tighter than your instrument's real
+resolution at that mass; a floor of ~0.005-0.01 Da is more realistic).
+
+Both `score_spectrum_vs_linear` and `ion_evidence_table` now expose
+tol_ppm/tol_da_floor instead of a single flat `tol`. See the note at the
+bottom of this file for what still needs updating in wine_feature_classifier.py
+and (likely) linear_denovo.py, which I have not patched here since I
+haven't seen that file's source -- happy to do it if you want the fix
+propagated end-to-end.
+
 Why the scoring logic differs from the cyclic version
 ────────────────────────────────────────────────────
 Cyclic peptides (WineCycloPep):
-  • n possible ring-opening positions → n overlapping bn-ion ladders
-  • NO free C-terminus → y1 ABSENCE is diagnostic of cyclicity
+  • n possible ring-opening positions -> n overlapping bn-ion ladders
+  • NO free C-terminus -> y1 ABSENCE is diagnostic of cyclicity
   • Immonium ions: composition check only (low weight, 0.10)
 
 Linear peptides (this module):
-  • ONE fragmentation series → single b-ion ladder, single y-ion ladder
-  • Free C-terminus → y-ion PRESENCE is diagnostic (opposite logic)
-  • a-ions (b - CO) are a genuine third series worth scoring separately —
+  • ONE fragmentation series -> single b-ion ladder, single y-ion ladder
+  • Free C-terminus -> y-ion PRESENCE is diagnostic (opposite logic)
+  • a-ions (b - CO) are a genuine third series worth scoring separately --
     for cyclic peptides a-ions are largely redundant with the multi-
     rotation b-ion ladder, but for linear peptides they're an independent
     confirmation, so they get their own scoring dimension here rather
     than being folded into "loss ions" as in the cyclic script.
   • Immonium ions play the same confirmatory (low-weight) role as in
-    WineCycloPep — composition validation, not sequence-order evidence.
+    WineCycloPep -- composition validation, not sequence-order evidence.
 
-This module intentionally covers the SCORING function only — not a full
+This module intentionally covers the SCORING function only -- not a full
 Bruker .d reading / de novo composition search pipeline. If you want the
 full WineCycloPep-style pipeline (raw .d ingestion, composition search,
 FDR/decoy validation, 3D structures) built out for linear peptides, that's
-a separate, larger project — this gives you the core scoring engine to
+a separate, larger project -- this gives you the core scoring engine to
 drop into whatever spectrum source you're already using (e.g. your
 MS-DIAL / GNPS exports).
 
@@ -46,7 +73,6 @@ ORCID  : 0000-0002-7720-3733
 """
 
 from __future__ import annotations
-
 import numpy as np
 
 from mass_utils import (
@@ -100,6 +126,30 @@ def y_ions(sequence: str, charge: int = 1) -> list[float]:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# PPM-SCALED MATCHING TOLERANCE
+# ══════════════════════════════════════════════════════════════════════════
+
+DEFAULT_TOL_PPM = 15.0       # typical high-res QTOF/Orbitrap mass accuracy
+DEFAULT_TOL_DA_FLOOR = 0.008  # absolute floor for very low-mass ions
+
+
+def match_window(theo_mz: float, tol_ppm: float = DEFAULT_TOL_PPM,
+                  tol_da_floor: float = DEFAULT_TOL_DA_FLOOR) -> float:
+    """
+    Resolve the matching half-window (Da) for one theoretical ion m/z.
+
+    Primary scaling is ppm (window = theo_mz * tol_ppm * 1e-6), since real
+    instrument mass error scales with m/z. tol_da_floor sets a minimum
+    absolute window so low-mass ions (immonium ions ~70-140 Da) aren't held
+    to an unrealistically tiny window purely because ppm math shrinks fast
+    at low mass -- e.g. at 15 ppm, a 70 Da ion gets +-0.00105 Da, likely
+    tighter than real achievable resolution at that mass.
+    """
+    ppm_window = theo_mz * tol_ppm * 1e-6
+    return max(ppm_window, tol_da_floor)
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # SCORING
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -119,12 +169,16 @@ def score_spectrum_vs_linear(
     mz_obs: np.ndarray,
     int_obs: np.ndarray,
     sequence: str,
-    tol: float = 0.02,
+    tol_ppm: float = DEFAULT_TOL_PPM,
+    tol_da_floor: float = DEFAULT_TOL_DA_FLOOR,
     charge: int = 1,
 ) -> dict:
     """
     Score an MS2 spectrum against a linear peptide candidate sequence
     using a/b/y ion coverage + immonium confirmation.
+
+    Matching tolerance is now ppm-scaled per ion (see match_window above)
+    instead of a single flat Da value -- see module PATCH NOTE.
 
     Mirrors score_spectrum_vs_cyclic's structure and return-dict shape
     (composite + per-dimension scores + matched/total counts) so it can
@@ -144,7 +198,10 @@ def score_spectrum_vs_linear(
     def _coverage(theo: list[float]) -> tuple[int, int, float]:
         if not theo:
             return 0, 0, 0.0
-        matched = sum(1 for mz in theo if np.any(np.abs(mz_obs - mz) <= tol))
+        matched = sum(
+            1 for mz in theo
+            if np.any(np.abs(mz_obs - mz) <= match_window(mz, tol_ppm, tol_da_floor))
+        )
         return matched, len(theo), matched / len(theo)
 
     b_matched, b_total, b_coverage = _coverage(b_theo)
@@ -156,7 +213,8 @@ def score_spectrum_vs_linear(
     all_theo = b_theo + a_theo + y_theo
     matched_int = 0.0
     for mz in all_theo:
-        hits = np.where(np.abs(mz_obs - mz) <= tol)[0]
+        w = match_window(mz, tol_ppm, tol_da_floor)
+        hits = np.where(np.abs(mz_obs - mz) <= w)[0]
         if len(hits) > 0:
             matched_int += float(np.max(int_obs[hits]))
     intensity_score = matched_int / total_int if total_int > 0 else 0.0
@@ -198,7 +256,8 @@ def ion_evidence_table(
     mz_obs: np.ndarray,
     int_obs: np.ndarray,
     sequence: str,
-    tol: float = 0.02,
+    tol_ppm: float = DEFAULT_TOL_PPM,
+    tol_da_floor: float = DEFAULT_TOL_DA_FLOOR,
     charge: int = 1,
 ) -> list[dict]:
     """
@@ -207,29 +266,35 @@ def ion_evidence_table(
     theoretical m/z, the closest observed m/z (if matched), the mass
     error (Delta Da and Delta ppm), and whether it counted as a match.
 
+    Now reports the actual per-ion matching window used (`match_window_Da`)
+    alongside delta_ppm, so a borderline call is visible at a glance
+    instead of requiring a manual check against a hidden flat tolerance.
+
     This is the audit trail behind score_spectrum_vs_linear's composite
-    score -- same ion series (b/a/y/immonium), same tolerance, but
-    reported per-ion instead of collapsed into coverage fractions, so a
-    researcher can see exactly which ions did (or didn't) support a call.
+    score -- same ion series (b/a/y/immonium), same ppm-scaled tolerance,
+    but reported per-ion instead of collapsed into coverage fractions, so
+    a researcher can see exactly which ions did (or didn't) support a call.
     """
     from mass_utils import immonium_ions
 
     rows: list[dict] = []
     n = len(sequence)
 
-    def _closest_match(theo_mz: float) -> tuple[float | None, float | None]:
-        """Return (observed_mz, observed_intensity) for the closest peak
-        within tol, or (None, None) if nothing matches."""
+    def _closest_match(theo_mz: float) -> tuple[float | None, float | None, float]:
+        """Return (observed_mz, observed_intensity, window_Da) for the
+        closest peak within the ppm-scaled window, or (None, None, window)
+        if nothing matches."""
+        w = match_window(theo_mz, tol_ppm, tol_da_floor)
         if len(mz_obs) == 0:
-            return None, None
+            return None, None, w
         diffs = np.abs(mz_obs - theo_mz)
         idx = np.argmin(diffs)
-        if diffs[idx] <= tol:
-            return float(mz_obs[idx]), float(int_obs[idx])
-        return None, None
+        if diffs[idx] <= w:
+            return float(mz_obs[idx]), float(int_obs[idx]), w
+        return None, None, w
 
     def _add_ion(label: str, ion_type: str, theo_mz: float) -> None:
-        obs_mz, obs_int = _closest_match(theo_mz)
+        obs_mz, obs_int, window_da = _closest_match(theo_mz)
         matched = obs_mz is not None
         delta_da = round(obs_mz - theo_mz, 5) if matched else None
         delta_ppm = round(1e6 * (obs_mz - theo_mz) / theo_mz, 2) if matched else None
@@ -240,6 +305,7 @@ def ion_evidence_table(
             "observed_mz": round(obs_mz, 5) if matched else None,
             "delta_Da": delta_da,
             "delta_ppm": delta_ppm,
+            "match_window_Da": round(window_da, 5),
             "observed_intensity": round(obs_int, 1) if matched else None,
             "matched": matched,
         })
@@ -285,5 +351,14 @@ if __name__ == "__main__":
     int_obs = np.ones_like(mz_obs) * 1000.0
 
     result = score_spectrum_vs_linear(mz_obs, int_obs, seq)
-    print(f"\nScore: {result['composite']} → {confidence_tier(result['composite'])}")
+    print(f"\nScore: {result['composite']} -> {confidence_tier(result['composite'])}")
     print(result)
+
+    # Borderline test: shift one b-ion by 20 ppm to show the ppm scaling
+    # catching what a flat 0.02 Da tolerance would have silently passed
+    # at high mass and rejected at low mass.
+    shifted = mz_obs.copy()
+    shifted[0] = shifted[0] * (1 + 20e-6)  # +20 ppm on the first b-ion
+    result_shifted = score_spectrum_vs_linear(shifted, int_obs, seq)
+    print(f"\n+20ppm shift on first ion -> composite {result_shifted['composite']} "
+          f"(window at that mass: {match_window(mz_obs[0]):.5f} Da)")

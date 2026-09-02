@@ -2,7 +2,22 @@
 
 > *Step 3c of the Wine Peptidome series — family triage (pesticides, lipids, polysaccharides, sugars, proteins, peptides) and a/b/y/immonium fragment-informed scoring of 2-10 AA peptide candidates, applied to full untargeted UHPLC-RP feature tables from wine lees.*
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Pyteomics](https://img.shields.io/badge/Pyteomics-mass%20engine-8B0000)](https://pyteomics.readthedocs.io/) [![ORCID](https://img.shields.io/badge/ORCID-0000--0002--7720--3733-a6ce39?logo=orcid)](https://orcid.org/0000-0002-7720-3733) [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://314olamda-winefeaturetriage.streamlit.app)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/314Olamda/WineFeatureTriage/blob/main/LICENSE)
+[![Pyteomics](https://img.shields.io/badge/Pyteomics-mass%20engine-8B0000)](https://pyteomics.readthedocs.io/)
+[![ORCID](https://img.shields.io/badge/ORCID-0000--0002--7720--3733-a6ce39?logo=orcid)](https://orcid.org/0000-0002-7720-3733)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://314olamda-winefeaturetriage.streamlit.app)
+
+---
+
+## 🩹 Changelog
+
+**[Unreleased] — ppm-scaled ion matching tolerance**
+
+Fixes the issue flagged below under *Known limitations* ("Fixed Da tolerance, not ppm-scaled"), caught via the `Ion_Evidence` sheet: a MEDIUM-tier call had several ions matching only at 21–27 ppm error while still passing the old flat 0.02 Da window — far looser than the sub-1 ppm seen on HIGH-tier calls, because a flat Da tolerance is simultaneously too loose at high mass and too tight at low mass.
+
+- `linear_peptide_scoring.py`: `score_spectrum_vs_linear()` and `ion_evidence_table()` now take `tol_ppm` (default 15) and `tol_da_floor` (default 0.008 Da, protecting low-mass immonium ions from an unrealistically tight ppm window) instead of a single flat `tol` in Da. `Ion_Evidence` output gains a `match_window_Da` column showing the actual per-ion window used, so a borderline call is visible directly in the sheet.
+- **Status: partial.** The scoring/evidence module itself is fixed and independently testable (see its `__main__` self-test, which now includes a +20 ppm shift demo). The caller wiring is **not yet updated**: `wine_feature_classifier.py`'s two call sites (`classify_family()` → `identify_linear_peptide()`, and `process_feature_table()` → `ion_evidence_table()`) still pass a flat `tol=tol` and need to thread `tol_ppm`/`tol_da_floor` through instead. Whether `linear_denovo.py`'s `identify_linear_peptide()` does its own separate ion matching internally (and would need the same fix) hasn't been checked yet. **End-to-end pipeline behavior is unchanged until both of those are done.**
 
 ---
 
@@ -18,13 +33,13 @@ The sections below cover running it locally instead (for development, customizat
 
 ## 🍷 Where this fits in the Wine Peptidome series
 
-| Step | Repository | What it does |
-|------|------------|---------------|
-| 1 | [WinePeptidome](https://github.com/314Olamda/WinePeptidome) | Retrieves *S. cerevisiae* & *V. vinifera* proteins (500 Da – 100 kDa) from UniProt REST API + Proteins API |
-| 2 | [WineStructure](https://github.com/314Olamda/WineStructure) | AlphaFold 3D structures + per-residue pLDDT confidence |
-| 3 | [WineCycloPep](https://github.com/314Olamda/WineCycloPep) | De novo **cyclic** peptide detection from Bruker `.d` files — bn-ion rotations, FDR, 3D conformers |
-| 3b | [WineLinearPep](https://github.com/314Olamda/WineLinearPep) | De novo **linear** peptide identification for a single spectrum — a/b/y/immonium scoring, target-decoy FDR |
-| **3c** | **WineFeatureTriage ← you are here** | Applies WineLinearPep's engine across a **whole untargeted feature table** — family triage first, then 2-10 AA scoring on the peptide-consistent subset |
+| Step   | Repository                                                  | What it does                                                                                                                                              |
+| ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1      | [WinePeptidome](https://github.com/314Olamda/WinePeptidome)  | Retrieves *S. cerevisiae* & *V. vinifera* proteins (500 Da – 100 kDa) from UniProt REST API + Proteins API                                               |
+| 2      | [WineStructure](https://github.com/314Olamda/WineStructure)  | AlphaFold 3D structures + per-residue pLDDT confidence                                                                                                    |
+| 3      | [WineCycloPep](https://github.com/314Olamda/WineCycloPep)    | De novo **cyclic** peptide detection from Bruker `.d` files — bn-ion rotations, FDR, 3D conformers                                                       |
+| 3b     | [WineLinearPep](https://github.com/314Olamda/WineLinearPep)  | De novo **linear** peptide identification for a single spectrum — a/b/y/immonium scoring, target-decoy FDR                                              |
+| **3c** | **WineFeatureTriage ← you are here**                          | Applies WineLinearPep's engine across a **whole untargeted feature table** — family triage first, then 2-10 AA scoring on the peptide-consistent subset |
 
 ---
 
@@ -36,7 +51,7 @@ WineLinearPep answers *"is this one spectrum a 2-10 AA peptide, and which sequen
 
 ## 🧬 Pipeline architecture
 
-```
+```mermaid
 graph TD
     A[Uploaded feature table\nRT, m/z, adduct, charge, CCS, MS fragments] --> B[classify_family per feature]
 
@@ -109,16 +124,16 @@ Opens at `http://localhost:8501`.
 
 ## 📦 Repository structure
 
-| File | Role |
-|------|------|
-| `mass_utils.py` | Pyteomics-backed mass/ion layer (shared with WineLinearPep) |
-| `linear_peptide_scoring.py` | `score_spectrum_vs_linear()` — a/b/y/immonium coverage scoring (shared with WineLinearPep) |
-| `linear_denovo.py` | Composition search + target-decoy FDR pipeline (shared with WineLinearPep, includes two performance fixes — see below) |
-| `wine_feature_classifier.py` | **This repo's core tool** — family triage + Sheet 1/2/3 workbook generation |
-| `generate_template.py` | Synthetic unannotated feature table generator, for testing without real data |
-| `streamlit_app.py` | Web UI — upload, run, download, no local Python needed (see **Try it online** above) |
-| `requirements.txt` | Dependencies for Streamlit Cloud deployment |
-| `example_data/UHPLC_RP_Wine_Template.xlsx` | Example input — 77 synthetic features across all families |
+| File                                       | Role                                                                                                                                                       |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mass_utils.py`                            | Pyteomics-backed mass/ion layer (shared with WineLinearPep)                                                                                               |
+| `linear_peptide_scoring.py`                | `score_spectrum_vs_linear()` — a/b/y/immonium coverage scoring (shared with WineLinearPep). **Now ppm-scaled (`tol_ppm`/`tol_da_floor`) — see Changelog.** |
+| `linear_denovo.py`                         | Composition search + target-decoy FDR pipeline (shared with WineLinearPep, includes two performance fixes — see below)                                    |
+| `wine_feature_classifier.py`               | **This repo's core tool** — family triage + Sheet 1/2/3 workbook generation                                                                               |
+| `generate_template.py`                     | Synthetic unannotated feature table generator, for testing without real data                                                                              |
+| `streamlit_app.py`                         | Web UI — upload, run, download, no local Python needed (see **Try it online** above)                                                                      |
+| `requirements.txt`                         | Dependencies for Streamlit Cloud deployment                                                                                                               |
+| `example_data/UHPLC_RP_Wine_Template.xlsx` | Example input — 77 synthetic features across all families                                                                                                 |
 
 ---
 
@@ -126,14 +141,14 @@ Opens at `http://localhost:8501`.
 
 The tool expects an Excel file with a sheet named `Features` and these columns:
 
-| Column | Description |
-|---|---|
-| `Feature_ID` | Unique identifier |
-| `RT_min` | Retention time, minutes |
-| `m/z` | Observed m/z |
-| `Adduct` | `[M+H]+`, `[M+Na]+`, or `[M+NH4]+` |
-| `Charge` | Charge state |
-| `CCS_A2` | Collision cross-section, Å² |
+| Column                        | Description                                                              |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `Feature_ID`                  | Unique identifier                                                        |
+| `RT_min`                      | Retention time, minutes                                                  |
+| `m/z`                         | Observed m/z                                                             |
+| `Adduct`                      | `[M+H]+`, `[M+Na]+`, or `[M+NH4]+`                                       |
+| `Charge`                      | Charge state                                                             |
+| `CCS_A2`                      | Collision cross-section, Å²                                              |
 | `MS_Fragments (mz:intensity)` | Semicolon-separated `mz:intensity` pairs, e.g. `44.049:1000;72.045:5000` |
 
 No `Compound_name`, `Sequence_peptide`, or annotation columns are expected or used — this tool is designed for **pre-annotation** triage.
@@ -142,12 +157,12 @@ No `Compound_name`, `Sequence_peptide`, or annotation columns are expected or us
 
 ## 📊 Output: the results workbook
 
-| Sheet | Content |
-|---|---|
-| **Summary_Families** | Feature count and % of total per predicted family (Pesticide, Lipid, Polysaccharide, Sugar, Protein, Peptide_11-50AA, Oligopeptide_>50AA, Peptide_2-10AA) |
-| **Oligopeptides_gt50AA** | Features consistent with a linear peptide >50 AA — flagged, not scored (outside this tool's fragment-scoring scope) |
-| **Peptides_2to10AA** | Every feature confirmed as a 2-10 AA peptide by fragment evidence, with top candidate sequence, composite score, confidence tier, `q_storey`, and isobaric-tie flags |
-| **Ion_Evidence** | The audit trail behind each score: one row per a/b/y/immonium ion checked for every top candidate — theoretical m/z, observed m/z, Δ Da, Δ ppm, intensity, and matched/not |
+| Sheet                     | Content                                                                                                                                                                       |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Summary\_Families**     | Feature count and % of total per predicted family (Pesticide, Lipid, Polysaccharide, Sugar, Protein, Peptide\_11-50AA, Oligopeptide\_>50AA, Peptide\_2-10AA)                |
+| **Oligopeptides\_gt50AA** | Features consistent with a linear peptide >50 AA — flagged, not scored (outside this tool's fragment-scoring scope)                                                         |
+| **Peptides\_2to10AA**     | Every feature confirmed as a 2-10 AA peptide by fragment evidence, with top candidate sequence, composite score, confidence tier, `q_storey`, and isobaric-tie flags        |
+| **Ion\_Evidence**         | The audit trail behind each score: one row per a/b/y/immonium ion checked for every top candidate — theoretical m/z, observed m/z, Δ Da, Δ ppm, **match window (Da)**, intensity, and matched/not |
 
 The web app also displays `Ion_Evidence` inline as an expandable table per feature, so you can see exactly why a sequence was called before downloading anything.
 
@@ -159,7 +174,7 @@ Family triage for pesticide/lipid/sugar/polysaccharide/protein uses **mass-windo
 
 The 2-10 AA peptide tier is stricter: a feature is only called `Peptide_2-10AA` if its **fragment ions actually support** a b/y/a/immonium composite score ≥ 0.40 — a matching precursor mass alone is not sufficient. This was a real bug caught during development: at masses in the 700-1500 Da range, hundreds to thousands of amino-acid compositions can match a given mass within 0.02 Da purely by coincidence, so mass-only classification mislabeled sugars and lipids as peptides. Requiring fragment-supported scoring above threshold fixed this.
 
-**Validated accuracy** (synthetic test set, 77 features): **100% precision**, **~12% recall** on 2-10 AA calls. The precision means every call the tool makes is trustworthy; the recall gap is a direct consequence of runtime caps (`max_compositions=15`, `max_perms_per_composition=15`) needed for interactive use — see **Scaling for production** below. Every call's reasoning is auditable via the `Ion_Evidence` sheet / in-app expander (see Output section above) — nothing is a black-box score.
+**Validated accuracy** (synthetic test set, 77 features): **100% precision**, **~12% recall** on 2-10 AA calls. The precision means every call the tool makes is trustworthy; the recall gap is a direct consequence of runtime caps (`max_compositions=15`, `max_perms_per_composition=15`) needed for interactive use — see **Scaling for production** below. Every call's reasoning is auditable via the `Ion_Evidence` sheet / in-app expander (see Output section above) — nothing is a black-box score. *(Note: this accuracy figure predates the ppm-tolerance patch above and hasn't been re-measured against it yet — worth re-running once the caller wiring is updated.)*
 
 ---
 
@@ -189,14 +204,12 @@ Found and fixed while building this tool — both are real algorithmic issues, n
 
 ---
 
----
-
 ## ⚠️ Known limitations
 
 - **Recall vs. runtime tradeoff** (see Scaling for production above).
-- **I/L isobaric ambiguity** is reported, not resolved — expect tied top candidates when a composition contains I or L. Disambiguation requires orthogonal evidence (retention time, ion mobility 1/K₀, chemical derivatization).
+- **I/L isobaric ambiguity** is reported, not resolved — expect tied top candidates when a composition contains I or L. Disambiguation requires orthogonal evidence (retention time, ion mobility 1/K₀, chemical derivatization). *Note: the feature table already carries a `CCS_A2` column that isn't currently used anywhere in `classify_family()` or scoring — a natural next step toward resolving this, not yet implemented.*
 - **Non-peptide family triage is heuristic**, not a confirmed identification — treat `Summary_Families` as a first-pass overview to prioritize what needs real spectral library confirmation, not a final annotation.
-- **Fixed Da tolerance, not ppm-scaled.** Ion matching uses a flat `tol` in Da (default 0.02) across the whole mass range. This was caught via the `Ion_Evidence` sheet: a MEDIUM-tier call showed several ions matching only at 21-27 ppm error while still passing the fixed tolerance — much looser than the sub-1 ppm seen on HIGH-tier calls. A ppm-scaled tolerance would flag this kind of borderline match more consistently across the mass range. Not yet fixed — check `delta_ppm` in `Ion_Evidence` manually for now when a call looks borderline.
+- ~~**Fixed Da tolerance, not ppm-scaled.**~~ **Partially fixed — see Changelog above.** `linear_peptide_scoring.py` now uses `tol_ppm`/`tol_da_floor`; `wine_feature_classifier.py`'s call sites and `linear_denovo.py`'s internal matching (if any) still need updating before this is a pipeline-wide fix. Until then, still check `delta_ppm` / the new `match_window_Da` column in `Ion_Evidence` manually for borderline calls.
 
 ---
 
@@ -229,11 +242,10 @@ Found and fixed while building this tool — both are real algorithmic issues, n
 
 **Pol Giménez-Gil**, PhD
 Postdoctoral Researcher — ISVV, Université de Bordeaux
-Scopus ID: 57219336109 · ORCID: [0000-0002-7720-3733](https://orcid.org/0000-0002-7720-3733)
-ResearchGate: [Pol_Gimenez2](https://www.researchgate.net/profile/Pol_Gimenez2)
+Scopus ID: 57219336109 · ORCID: [0000-0002-7720-3733](https://orcid.org/0000-0002-7720-3733) · ResearchGate: [Pol_Gimenez2](https://www.researchgate.net/profile/Pol_Gimenez2)
 
 ---
 
 ## 📜 License
 
-MIT — see [LICENSE](LICENSE)
+MIT — see [LICENSE](https://github.com/314Olamda/WineFeatureTriage/blob/main/LICENSE)
